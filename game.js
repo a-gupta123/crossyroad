@@ -119,6 +119,16 @@ const M = {
   fencePost:  mat(0xc8a060),
   fenceRail:  mat(0xd4b070),
   fenceCap:   mat(0xe0c080),
+  // Railroad
+  railBed:    mat(0x5a5048),   // gravel ballast
+  railTie:    mat(0x4a3520),   // wooden sleeper
+  railMetal:  mat(0x9098a0),   // steel rail
+  trainBody:  mat(0xb02828),   // red train
+  trainDark:  mat(0x7a1a1a),
+  trainWin:   mat(0x334455),
+  signalOff:  mat(0x551515),   // dim red when no train
+  signalOn:   new THREE.MeshBasicMaterial({ color: 0xff2020 }), // bright red when train coming
+  signalPost: mat(0x222222),
 };
 const CAR_COLORS = [M.carRed, M.carBlue, M.carYellow, M.carGreen, M.carWhite, M.carOrange, M.carPurple];
 
@@ -157,8 +167,9 @@ function rowType(r) {
   if (r <= 2) return 'grass';
   const rng  = seededRand(r * 997 + 17);
   const roll = rng();
-  if (roll < 0.50) return 'grass';
-  if (roll < 0.85) return 'road';
+  if (roll < 0.42) return 'grass';
+  if (roll < 0.68) return 'road';
+  if (roll < 0.85) return 'rail';   // railroad
   return 'water';
 }
 
@@ -271,6 +282,63 @@ function makeLog(numTiles) {
     addAt(g, cap, sx, 0.36, 0);
   }
   g.userData.length = len + 0.3;
+  return g;
+}
+
+// ── Train ──────────────────────────────────────────────────────────
+// A single long train that spans several cars, sweeping across fast.
+function makeTrain() {
+  const g = new THREE.Group();
+  const NUM_CARS = 4;
+  const CAR_LEN  = 3.2;
+  const gap      = 0.25;
+
+  for (let i = 0; i < NUM_CARS; i++) {
+    const cx = i * (CAR_LEN + gap);
+    // Body
+    const bodyMat = i === 0 ? M.trainBody : (i % 2 === 0 ? M.trainBody : M.trainDark);
+    const car = box(CAR_LEN, 1.05, 1.3, bodyMat);
+    addAt(g, car, cx, 0.75, 0);
+    // Roof stripe
+    const roof = box(CAR_LEN * 0.96, 0.12, 1.32, M.trainDark);
+    addAt(g, roof, cx, 1.28, 0);
+    // Windows (row of them)
+    for (let w = -1; w <= 1; w++) {
+      addAt(g, box(0.6, 0.36, 0.02, M.trainWin), cx + w * 0.9, 0.9, 0.66);
+      addAt(g, box(0.6, 0.36, 0.02, M.trainWin), cx + w * 0.9, 0.9, -0.66);
+    }
+    // Wheels
+    for (const wx of [cx - CAR_LEN * 0.3, cx + CAR_LEN * 0.3]) {
+      for (const wz of [0.5, -0.5]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.12, 10), M.black);
+        wheel.rotation.z = Math.PI / 2;
+        addAt(g, wheel, wx, 0.22, wz);
+      }
+    }
+  }
+
+  // Front nose light on the lead car
+  addAt(g, box(0.1, 0.2, 0.3, M.yellow), -CAR_LEN / 2 - 0.05, 0.7, 0);
+
+  // Ground shadow spanning whole train
+  const totalLen = NUM_CARS * (CAR_LEN + gap);
+  const sd = new THREE.Mesh(new THREE.PlaneGeometry(totalLen, 1.5), M.shadowMat);
+  sd.rotation.x = -Math.PI / 2;
+  addAt(g, sd, totalLen / 2 - CAR_LEN / 2 - gap / 2, 0.03, 0);
+
+  g.userData.length = totalLen;
+  return g;
+}
+
+// ── Rail warning signal (post with a red lamp) ──────────────────────
+function makeSignal() {
+  const g = new THREE.Group();
+  const post = box(0.12, 1.0, 0.12, M.signalPost);
+  addAt(g, post, 0, 0.5, 0);
+  // Lamp — starts dim; material swapped when a train is coming
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), M.signalOff);
+  addAt(g, lamp, 0, 1.0, 0);
+  g.userData.lamp = lamp;
   return g;
 }
 
@@ -391,6 +459,54 @@ function buildRow(r) {
 
     speed = baseSpeed; // stored for reference, per-car speed is in userData
 
+  // ── Railroad ─────────────────────────────
+  } else if (type === 'rail') {
+    // Gravel ballast bed
+    const bed = box(stripW, 0.26, TILE, M.railBed);
+    bed.receiveShadow = true;
+    addAt(group, bed, 0, -0.13, 0);
+
+    // Wooden ties (sleepers) across the track
+    for (let x = -HALF_W - 2; x <= HALF_W + 2; x++) {
+      const tie = box(0.35, 0.08, TILE * 0.82, M.railTie);
+      addAt(group, tie, x * TILE * 0.5, 0.02, 0);
+    }
+
+    // Two steel rails running along X
+    const railA = box(stripW, 0.10, 0.12, M.railMetal);
+    addAt(group, railA, 0, 0.08, -0.42);
+    const railB = box(stripW, 0.10, 0.12, M.railMetal);
+    addAt(group, railB, 0, 0.08,  0.42);
+
+    // Warning signals at both playable edges
+    const sigL = makeSignal();
+    sigL.position.set(-HALF_W * TILE - 0.6, 0, 0.7);
+    group.add(sigL);
+    const sigR = makeSignal();
+    sigR.position.set( HALF_W * TILE + 0.6, 0, 0.7);
+    group.add(sigR);
+
+    // Train: created but parked off-screen; the animate loop drives the cycle
+    dir = rng() < 0.5 ? 1 : -1;
+    const train = makeTrain();
+    train.visible = false;
+    train.position.set(0, 0, 0);
+    group.add(train);
+
+    // Timing state for the warning→pass cycle (seconds)
+    const rd = {
+      type, group, cars, logs, speed: 0, dir,
+      train,
+      signals: [sigL, sigR],
+      trainState: 'idle',           // idle → warning → passing → idle
+      timer: 1.5 + rng() * 4,       // time until next warning
+      warnDuration: 1.6,            // how long lights flash before train
+      trainSpeed: (0.12 + rng() * 0.05) * TILE,  // fast
+      trainX: 0,
+    };
+    rowData[r] = rd;
+    return;
+
   // ── Water ────────────────────────────────
   } else {
     const tileMat = r % 2 === 0 ? M.water : M.waterDark;
@@ -406,11 +522,12 @@ function buildRow(r) {
 
     dir   = rng() < 0.5 ? 1 : -1;
     speed = (rng() * 0.016 + 0.008) * TILE;
-    const numLogs = Math.floor(rng() * 2) + 2;
+    // More logs, closer together, so the river is reliably crossable
+    const numLogs = Math.floor(rng() * 2) + 3;   // 3-4 logs (was 2-3)
     const spacing = stripW / numLogs;
     for (let i = 0; i < numLogs; i++) {
       const logLen  = Math.floor(rng() * 2) + 2;
-      const lx      = -stripW / 2 + spacing * i + (rng() - 0.5) * spacing * 0.35;
+      const lx      = -stripW / 2 + spacing * i + (rng() - 0.5) * spacing * 0.25;
       const logMesh = makeLog(logLen);
       logMesh.position.set(lx, 0, 0);
       logMesh.userData.dir    = dir;
@@ -520,7 +637,12 @@ for (let i = 0; i < BACK_FENCE_POSTS; i++) {
   }
 }
 
-// Update all fence positions — call every frame and at startup
+// Back fence is a PERMANENT wall one row behind the start (row 0).
+// Row 0 is at world Z = 0, so the fence sits at Z = +TILE. It never moves —
+// the chicken cannot go behind it.
+backFenceGroup.position.set(0, 0, TILE);
+
+// Update side fence positions — call every frame and at startup
 function updateFence() {
   // Side fences: one segment per row, spanning from well behind to well ahead
   const base = playerRow - LOOK_BEHIND - 1;
@@ -529,10 +651,6 @@ function updateFence() {
     fenceSegments.left[i].position.set(-FENCE_X, 0, worldZ);
     fenceSegments.right[i].position.set( FENCE_X, 0, worldZ);
   }
-  // Back fence: sits one row behind the start (row 0), fixed at Z = TILE
-  // so it's always just behind where the chicken began
-  const backZ = -(playerRow - LOOK_BEHIND) * TILE + TILE;
-  backFenceGroup.position.set(0, 0, backZ);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -669,8 +787,7 @@ function startJump(dir) {
 
   if (dir === 'left'  && newCol === playerCol) return;
   if (dir === 'right' && newCol === playerCol) return;
-  // no hard floor on backward movement — fence/boundary handles left/right,
-  // player can walk back freely
+  if (newRow < 0) return;   // back fence — can't go behind the start row
 
   playerRow = newRow;
   playerCol = newCol;
@@ -703,6 +820,19 @@ function checkCollisions() {
     for (const car of rd.cars) {
       const hl = (car.userData.halfLen || 0.75) + 0.15;
       if (Math.abs(car.position.x - cx) < hl) { triggerDeath(); return; }
+    }
+  }
+
+  if (rd.type === 'rail') {
+    // Only lethal while the train is actually sweeping through.
+    if (rd.trainState === 'passing') {
+      const len = rd.train.userData.length;
+      // Train spans [trainX, trainX + len] in its travel direction.
+      const front = rd.trainX;
+      const back  = rd.trainX + (rd.dir > 0 ? len : -len);
+      const lo = Math.min(front, back);
+      const hi = Math.max(front, back);
+      if (cx > lo - 0.3 && cx < hi + 0.3) { triggerDeath(); return; }
     }
   }
 
@@ -828,6 +958,59 @@ function landBump() {
 let shimmerT = 0;
 
 // ─────────────────────────────────────────────────────────────────
+//  RAILROAD CYCLE
+// ─────────────────────────────────────────────────────────────────
+// idle → (timer counts down) → warning (lights flash) → passing (train
+// sweeps across at high speed) → idle (reset timer). Mirrors Crossy Road:
+// the lights warn you before the train blasts through.
+function setSignals(rd, on) {
+  for (const sig of rd.signals) {
+    sig.userData.lamp.material = on ? M.signalOn : M.signalOff;
+  }
+}
+
+function updateRail(rd, dtSec) {
+  const bound = TILE * GRID_W / 2 + 4;
+
+  if (rd.trainState === 'idle') {
+    rd.timer -= dtSec;
+    setSignals(rd, false);
+    if (rd.timer <= 0) {
+      rd.trainState = 'warning';
+      rd.timer = rd.warnDuration;
+    }
+
+  } else if (rd.trainState === 'warning') {
+    rd.timer -= dtSec;
+    // Flash the lights (blink ~4Hz)
+    setSignals(rd, Math.floor(rd.timer * 8) % 2 === 0);
+    if (rd.timer <= 0) {
+      rd.trainState = 'passing';
+      setSignals(rd, true);
+      // Position train just off the entry edge
+      rd.train.visible = true;
+      rd.train.rotation.y = rd.dir > 0 ? 0 : Math.PI;
+      const len = rd.train.userData.length;
+      rd.trainX = rd.dir > 0 ? -bound - len : bound + len;
+      rd.train.position.x = rd.trainX;
+    }
+
+  } else if (rd.trainState === 'passing') {
+    rd.trainX += rd.trainSpeed * rd.dir * (dtSec * 60); // frame-rate independent
+    rd.train.position.x = rd.trainX;
+    const len = rd.train.userData.length;
+    // Off the far edge?
+    const gone = rd.dir > 0 ? rd.trainX > bound + len : rd.trainX < -bound - len;
+    if (gone) {
+      rd.train.visible = false;
+      rd.trainState = 'idle';
+      rd.timer = 2.5 + Math.random() * 4;
+      setSignals(rd, false);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  MAIN LOOP
 // ─────────────────────────────────────────────────────────────────
 let lastTime = performance.now();
@@ -861,6 +1044,9 @@ function animate(now) {
           if (log.position.x >  bound + hl) log.position.x = -bound - hl;
           if (log.position.x < -bound - hl) log.position.x =  bound + hl;
         }
+      }
+      if (rd.type === 'rail') {
+        updateRail(rd, dt / 1000);
       }
     }
 
