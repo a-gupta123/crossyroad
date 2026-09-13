@@ -27,7 +27,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
-renderer.setClearColor(0x5a8fa8);
+renderer.setClearColor(0x120a24); // deep space purple-black
 
 // ── Camera ───────────────────────────────────────────────────────
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
@@ -46,14 +46,14 @@ updateCameraFrustum();
 
 // ── Scene ────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.fog   = new THREE.Fog(0x5a8fa8, 30, 90);
+scene.fog   = new THREE.Fog(0x160c2a, 34, 95); // deep space haze
 
 // ── Lighting ─────────────────────────────────────────────────────
-// Muted ambient — keeps shadows visible and stops everything looking washed out
-scene.add(new THREE.AmbientLight(0x8899aa, 0.5));
+// Cool purple ambient for a nighttime-planet feel
+scene.add(new THREE.AmbientLight(0x6a5a90, 0.55));
 
-// Main sun — warm afternoon angle, moderate intensity
-const sun = new THREE.DirectionalLight(0xffe8b0, 0.85);
+// Main "star" light — a cold white-blue sun
+const sun = new THREE.DirectionalLight(0xcfd8ff, 0.9);
 sun.position.set(15, 28, 10);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -63,10 +63,34 @@ sc.near = 1; sc.far = 120;
 sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70;
 scene.add(sun);
 
-// Cool blue fill from opposite side
-const fill = new THREE.DirectionalLight(0x6688bb, 0.3);
-fill.position.set(-10, 12, -8);
+// Green rim glow from below — bounce off the alien liquid/planet
+const fill = new THREE.DirectionalLight(0x4faf6a, 0.35);
+fill.position.set(-10, 8, -8);
 scene.add(fill);
+
+// ── Starfield ─────────────────────────────────────────────────────
+// A large sphere of points surrounding the scene for a space backdrop.
+(function addStarfield() {
+  const starCount = 900;
+  const positions = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    // Distribute on a large sphere shell
+    const r = 120 + Math.random() * 60;
+    const theta = Math.random() * Math.PI * 2;
+    const phi   = Math.acos(2 * Math.random() - 1);
+    positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6 + 10; // keep mostly above
+    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.1, sizeAttenuation: true });
+  const stars = new THREE.Points(geo, starMat);
+  stars.frustumCulled = false;
+  scene.add(stars);
+  // Keep stars centred on the camera so they feel infinitely far
+  window.__stars = stars;
+})();
 
 // ── Helper: material factory ──────────────────────────────────────
 function mat(hex, opts = {}) {
@@ -74,61 +98,74 @@ function mat(hex, opts = {}) {
   return m;
 }
 
-// ── Materials ────────────────────────────────────────────────────
+// ── Materials ─────────────────────────────────────────────────────
+// SPACE THEME — an alien planet: purple-red regolith ground, a green
+// alien, UFO "cars", laser-beam "trains", glowing green liquid rivers
+// with floating asteroid rocks, and rock-cluster boundaries.
 const M = {
-  // Terrain — muted, earthy tones
-  grass:      mat(0x4a8f32),
-  grassDark:  mat(0x3a7226),
-  grassEdge:  mat(0x2d5c1e),
-  dirt:       mat(0x8a6840),
-  water:      mat(0x1a6090),
-  waterDark:  mat(0x145278),
-  waterFoam:  mat(0x5a9ec0),
-  road:       mat(0x444444),
-  roadDark:   mat(0x363636),
-  kerb:       mat(0x999999),
-  // Markings
-  white:      mat(0xdddddd),
-  yellow:     mat(0xd4a800),
-  // Log — darker wood
-  log:        mat(0x7a4e22),
-  logEnd:     mat(0x5c3a18),
-  logBark:    mat(0x9a6030),
-  // Chicken
-  chickenWht: mat(0xeeeeee),
-  cream:      mat(0xd8c090),
-  orange:     mat(0xcc6600),
-  beak:       mat(0xe08800),
-  red:        mat(0xaa0e0e),
-  black:      mat(0x0d0d0d),
-  // Cars — slightly desaturated
-  carRed:     mat(0xb81818),
-  carBlue:    mat(0x163ea8),
-  carYellow:  mat(0xc8a200),
-  carGreen:   mat(0x1a8835),
-  carWhite:   mat(0xcccccc),
-  carOrange:  mat(0xcc5500),
-  carPurple:  mat(0x5c1aaa),
-  glass:      mat(0x6aaabb, { transparent: true, opacity: 0.5 }),
-  tyre:       mat(0x141414),
-  rim:        mat(0x888888),
+  // Planet ground ("grass") — dusty purple-red regolith
+  grass:      mat(0x8a4a6a),
+  grassDark:  mat(0x743a58),
+  grassEdge:  mat(0x5c2d46),
+  dirt:       mat(0x6a3a2a),
+  // Green alien liquid ("water")
+  water:      mat(0x1f8a3a),
+  waterDark:  mat(0x156b2c),
+  waterFoam:  mat(0x6ff08a),
+  // Alien road — dark metallic path / crater rock
+  road:       mat(0x3a3450),
+  roadDark:   mat(0x2c283e),
+  kerb:       mat(0x6a6280),
+  // Markings — glowing energy strip
+  white:      mat(0x66e0ff),
+  yellow:     mat(0xffdd55),
+  // Floating rock (was log) — grey asteroid
+  log:        mat(0x6a6660),
+  logEnd:     mat(0x4e4a44),
+  logBark:    mat(0x82807a),
+  // Alien body (was chicken) — green
+  chickenWht: mat(0x4fd06a),   // main green skin
+  cream:      mat(0x3aa050),   // darker green (limbs/accents)
+  orange:     mat(0x2a8a3f),   // deep green
+  beak:       mat(0x9cf0b0),   // pale green (mouth/feet)
+  red:        mat(0x1a5c2a),   // very dark green (antenna base)
+  black:      mat(0x0a0a12),
+  eyeGlow:    new THREE.MeshBasicMaterial({ color: 0x000000 }),  // big black alien eyes
+  antennaTip: new THREE.MeshBasicMaterial({ color: 0xaaffcc }),  // glowing antenna orb
+  // UFO (was cars) — metallic saucers with glowing domes
+  carRed:     mat(0x9aa0b0),
+  carBlue:    mat(0x8890a8),
+  carYellow:  mat(0xb0b4c0),
+  carGreen:   mat(0x9098a8),
+  carWhite:   mat(0xc0c4d0),
+  carOrange:  mat(0xa8aec0),
+  carPurple:  mat(0x888ea4),
+  ufoDome:    mat(0x66ffcc, { transparent: true, opacity: 0.7 }),
+  ufoGlow:    new THREE.MeshBasicMaterial({ color: 0x00ffaa }),
+  ufoBeam:    new THREE.MeshBasicMaterial({ color: 0x66ffcc, transparent: true, opacity: 0.28, depthWrite: false }),
+  glass:      mat(0x66ffcc, { transparent: true, opacity: 0.55 }),
+  tyre:       mat(0x2a2e3a),
+  rim:        mat(0xaab0c0),
   // FX
   shadowMat:  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
-  roadLine:   mat(0xdddddd),
-  // Fence
-  fencePost:  mat(0xc8a060),
-  fenceRail:  mat(0xd4b070),
-  fenceCap:   mat(0xe0c080),
-  // Railroad
-  railBed:    mat(0x5a5048),   // gravel ballast
-  railTie:    mat(0x4a3520),   // wooden sleeper
-  railMetal:  mat(0x9098a0),   // steel rail
-  trainBody:  mat(0xb02828),   // red train
-  trainDark:  mat(0x7a1a1a),
-  trainWin:   mat(0x334455),
-  signalOff:  mat(0x551515),   // dim red when no train
-  signalOn:   new THREE.MeshBasicMaterial({ color: 0xff2020 }), // bright red when train coming
-  signalPost: mat(0x222222),
+  roadLine:   mat(0x66e0ff),
+  // Rock boundary (was fence) — grey/purple boulders
+  fencePost:  mat(0x6a6270),
+  fenceRail:  mat(0x565060),
+  fenceCap:   mat(0x7c7488),
+  // Rail bed — cratered planet surface
+  railBed:    mat(0x342f42),
+  railTie:    mat(0x4a4458),   // energy conduit strip
+  railMetal:  mat(0x8890a8),   // emitter rail
+  // Laser beam "train"
+  trainBody:  new THREE.MeshBasicMaterial({ color: 0xff2266 }),
+  trainDark:  new THREE.MeshBasicMaterial({ color: 0xff66aa }),
+  trainWin:   new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  trainGlow:  new THREE.MeshBasicMaterial({ color: 0xff88bb, transparent: true, opacity: 0.35, depthWrite: false }),
+  // Rail warning emitter lights
+  signalOff:  mat(0x333044),
+  signalOn:   new THREE.MeshBasicMaterial({ color: 0xff2266 }),
+  signalPost: mat(0x2a2836),
 };
 const CAR_COLORS = [M.carRed, M.carBlue, M.carYellow, M.carGreen, M.carWhite, M.carOrange, M.carPurple];
 
@@ -197,134 +234,148 @@ function makeBush(rng) {
   return g;
 }
 
-// ── Car ───────────────────────────────────────────────────────────
+// ── UFO (was Car) ───────────────────────────────────────────────
+// A hovering flying saucer. Radially symmetric so it reads the same
+// travelling either direction. Three size classes fill the roles the
+// sedan/truck/van used to. Keeps userData.halfLen for collision.
 function makeCar(colorMat, rng) {
   const g = new THREE.Group();
-  // Style: 0=sedan, 1=truck, 2=van
-  const style = Math.floor(rng() * 3);
+  const size = Math.floor(rng() * 3); // 0 small, 1 medium, 2 large
+  const scale = size === 0 ? 0.8 : size === 1 ? 1.0 : 1.25;
+  const hoverY = 0.55;
 
-  if (style === 1) {
-    // Truck
-    const cab  = box(0.9, 0.58, 0.84, colorMat);
-    addAt(g, cab, 0.28, 0.29, 0);
-    const trailer = box(1.1, 0.48, 0.80, M.carWhite);
-    addAt(g, trailer, -0.62, 0.24, 0);
-    addAt(g, box(0.04, 0.44, 0.70, M.glass), 0.73, 0.46, 0);
-    g.userData.halfLen = 1.05;
-  } else if (style === 2) {
-    // Van
-    const bod = box(1.5, 0.62, 0.84, colorMat);
-    addAt(g, bod, 0, 0.31, 0);
-    const top = box(1.2, 0.38, 0.80, colorMat);
-    addAt(g, top, -0.1, 0.74, 0);
-    addAt(g, box(0.04, 0.34, 0.66, M.glass), 0.60, 0.70, 0);
-    g.userData.halfLen = 0.85;
-  } else {
-    // Sedan
-    const bod = box(1.4, 0.40, 0.82, colorMat);
-    addAt(g, bod, 0, 0.20, 0);
-    const roof = box(0.85, 0.33, 0.74, colorMat);
-    addAt(g, roof, -0.08, 0.53, 0);
-    addAt(g, box(0.04, 0.28, 0.62, M.glass), 0.33, 0.48, 0);  // windshield
-    addAt(g, box(0.04, 0.26, 0.62, M.glass), -0.48, 0.48, 0); // rear
-    g.userData.halfLen = 0.75;
+  // Saucer disc — two cones base-to-base (classic UFO)
+  const discR = 0.85 * scale;
+  const topCone = new THREE.Mesh(new THREE.ConeGeometry(discR, 0.28 * scale, 20), colorMat);
+  topCone.castShadow = true;
+  addAt(g, topCone, 0, hoverY + 0.05, 0);
+  const botCone = new THREE.Mesh(new THREE.ConeGeometry(discR, 0.34 * scale, 20), colorMat);
+  botCone.rotation.x = Math.PI;
+  botCone.castShadow = true;
+  addAt(g, botCone, 0, hoverY - 0.10, 0);
+
+  // Rim band
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(discR * 0.92, 0.06 * scale, 8, 22), M.rim);
+  rim.rotation.x = Math.PI / 2;
+  addAt(g, rim, 0, hoverY, 0);
+
+  // Glowing dome cockpit
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.34 * scale, 12, 10, 0, Math.PI * 2, 0, Math.PI / 2), M.ufoDome);
+  addAt(g, dome, 0, hoverY + 0.14, 0);
+
+  // Ring of glowing lights around the rim underside
+  const lightCount = 8;
+  for (let i = 0; i < lightCount; i++) {
+    const a = (i / lightCount) * Math.PI * 2;
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.055 * scale, 6, 6), M.ufoGlow);
+    addAt(g, orb, Math.cos(a) * discR * 0.7, hoverY - 0.16, Math.sin(a) * discR * 0.7);
   }
 
-  // Wheels (shared across styles)
-  for (const wx of [0.52, -0.52]) for (const wz of [0.36, -0.36]) {
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.195, 0.195, 0.14, 9), M.tyre);
-    rim.rotation.z = Math.PI / 2;
-    addAt(g, rim, wx, 0.19, wz);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.15, 6), M.rim);
-    hub.rotation.z = Math.PI / 2;
-    addAt(g, hub, wx, 0.19, wz);
-  }
+  // Faint tractor beam glow underneath
+  const beam = new THREE.Mesh(
+    new THREE.ConeGeometry(discR * 0.55, hoverY, 14, 1, true),
+    M.ufoBeam
+  );
+  beam.rotation.x = Math.PI;
+  addAt(g, beam, 0, hoverY / 2 - 0.05, 0);
 
-  // Headlights
-  addAt(g, box(0.06, 0.10, 0.18, M.yellow), 0.72, 0.22,  0.26);
-  addAt(g, box(0.06, 0.10, 0.18, M.yellow), 0.72, 0.22, -0.26);
-  // Tail lights
-  addAt(g, box(0.06, 0.10, 0.18, M.red),   -0.72, 0.22,  0.26);
-  addAt(g, box(0.06, 0.10, 0.18, M.red),   -0.72, 0.22, -0.26);
-
-  // Shadow under car
-  const sd = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9), M.shadowMat);
+  // Ground shadow
+  const sd = new THREE.Mesh(new THREE.CircleGeometry(discR * 0.9, 16), M.shadowMat);
   sd.rotation.x = -Math.PI / 2;
   addAt(g, sd, 0, 0.02, 0);
 
-  g.userData.halfLen = g.userData.halfLen || 0.75;
+  g.userData.halfLen = discR;   // collision half-width
+  g.userData.spin = 0;          // for idle rotation
   return g;
 }
 
-// ── Log ───────────────────────────────────────────────────────────
+// ── Floating rock platform (was Log) ───────────────────────────────
+// A chunky asteroid the alien hops onto to cross the green liquid.
+// Built from several overlapping low-poly boulders along local X so it
+// still reads as a jump platform. Keeps userData.length for riding logic.
 function makeLog(numTiles) {
   const g   = new THREE.Group();
   const len = numTiles * TILE - 0.15;
-  // Main cylinder body
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.36, 0.38, len, 10, 1, false),
-    M.log
-  );
-  body.rotation.z = Math.PI / 2;
-  body.castShadow = body.receiveShadow = true;
-  addAt(g, body, 0, 0.36, 0);
-  // Bark stripe
-  const stripe = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.385, 0.385, len * 0.3, 10),
-    M.logBark
-  );
-  stripe.rotation.z = Math.PI / 2;
-  addAt(g, stripe, len * 0.12, 0.36, 0);
-  // End caps
-  for (const sx of [len / 2, -len / 2]) {
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.37, 10), M.logEnd);
-    cap.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
-    addAt(g, cap, sx, 0.36, 0);
+
+  // A base slab so the top is walkable and flat-ish
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(len, 0.34, 0.9, 1, 1, 1), M.log);
+  slab.castShadow = slab.receiveShadow = true;
+  addAt(g, slab, 0, 0.30, 0);
+
+  // Rocky boulders clustered along the slab (deterministic-ish by index)
+  const chunks = Math.max(2, Math.round(numTiles * 1.8));
+  for (let i = 0; i < chunks; i++) {
+    const t   = chunks === 1 ? 0.5 : i / (chunks - 1);
+    const bx  = -len / 2 + t * len;
+    const rsz = 0.28 + ((i * 7) % 5) * 0.05;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rsz, 0), (i % 2 ? M.logBark : M.logEnd));
+    rock.rotation.set(i * 0.7, i * 1.3, i * 0.5);
+    rock.castShadow = true;
+    addAt(g, rock, bx, 0.34, ((i % 3) - 1) * 0.12);
   }
+
+  // A couple of tiny top pebbles for texture
+  for (let i = 0; i < 2; i++) {
+    const peb = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12, 0), M.log);
+    addAt(g, peb, (i - 0.5) * len * 0.4, 0.5, (i % 2 ? 0.2 : -0.2));
+  }
+
+  // Ground shadow
+  const sd = new THREE.Mesh(new THREE.PlaneGeometry(len + 0.2, 1.0), M.shadowMat);
+  sd.rotation.x = -Math.PI / 2;
+  addAt(g, sd, 0, 0.03, 0);
+
   g.userData.length = len + 0.3;
   return g;
 }
 
-// ── Train ──────────────────────────────────────────────────────────
-// A single long train that spans several cars, sweeping across fast.
+// ── Laser beam (was Train) ─────────────────────────────────────────
+// A long glowing energy bolt that streaks across the track. Built along
+// local +X, origin at one end (matches how the train was positioned).
+// Keeps userData.length so the rail collision logic is unchanged.
 function makeTrain() {
   const g = new THREE.Group();
-  const NUM_CARS = 4;
-  const CAR_LEN  = 3.2;
-  const gap      = 0.25;
+  const totalLen = 14;            // long beam
+  const beamY    = 0.7;
 
-  for (let i = 0; i < NUM_CARS; i++) {
-    const cx = i * (CAR_LEN + gap);
-    // Body
-    const bodyMat = i === 0 ? M.trainBody : (i % 2 === 0 ? M.trainBody : M.trainDark);
-    const car = box(CAR_LEN, 1.05, 1.3, bodyMat);
-    addAt(g, car, cx, 0.75, 0);
-    // Roof stripe
-    const roof = box(CAR_LEN * 0.96, 0.12, 1.32, M.trainDark);
-    addAt(g, roof, cx, 1.28, 0);
-    // Windows (row of them)
-    for (let w = -1; w <= 1; w++) {
-      addAt(g, box(0.6, 0.36, 0.02, M.trainWin), cx + w * 0.9, 0.9, 0.66);
-      addAt(g, box(0.6, 0.36, 0.02, M.trainWin), cx + w * 0.9, 0.9, -0.66);
-    }
-    // Wheels
-    for (const wx of [cx - CAR_LEN * 0.3, cx + CAR_LEN * 0.3]) {
-      for (const wz of [0.5, -0.5]) {
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.12, 10), M.black);
-        wheel.rotation.z = Math.PI / 2;
-        addAt(g, wheel, wx, 0.22, wz);
-      }
-    }
+  // Bright inner core
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.22, totalLen, 12),
+    M.trainWin  // white-hot centre
+  );
+  core.rotation.z = Math.PI / 2;
+  addAt(g, core, totalLen / 2, beamY, 0);
+
+  // Mid energy layer
+  const mid = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.42, totalLen, 14),
+    M.trainBody
+  );
+  mid.rotation.z = Math.PI / 2;
+  addAt(g, mid, totalLen / 2, beamY, 0);
+
+  // Outer translucent glow sheath
+  const glow = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.72, 0.72, totalLen, 16),
+    M.trainGlow
+  );
+  glow.rotation.z = Math.PI / 2;
+  addAt(g, glow, totalLen / 2, beamY, 0);
+
+  // Bright rounded caps at each end
+  for (const ex of [0, totalLen]) {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.44, 12, 12), M.trainDark);
+    addAt(g, cap, ex, beamY, 0);
   }
 
-  // Front nose light on the lead car
-  addAt(g, box(0.1, 0.2, 0.3, M.yellow), -CAR_LEN / 2 - 0.05, 0.7, 0);
+  // Leading energy flare (bigger sphere at the front)
+  const flare = new THREE.Mesh(new THREE.SphereGeometry(0.6, 14, 12), M.trainGlow);
+  addAt(g, flare, 0, beamY, 0);
 
-  // Ground shadow spanning whole train
-  const totalLen = NUM_CARS * (CAR_LEN + gap);
-  const sd = new THREE.Mesh(new THREE.PlaneGeometry(totalLen, 1.5), M.shadowMat);
+  // Faint ground scorch shadow under the beam
+  const sd = new THREE.Mesh(new THREE.PlaneGeometry(totalLen, 1.2), M.trainGlow);
   sd.rotation.x = -Math.PI / 2;
-  addAt(g, sd, totalLen / 2 - CAR_LEN / 2 - gap / 2, 0.03, 0);
+  addAt(g, sd, totalLen / 2, 0.04, 0);
 
   g.userData.length = totalLen;
   return g;
@@ -392,9 +443,10 @@ function buildRow(r) {
     const kerbB = box(stripW, 0.18, 0.2, M.kerb);
     addAt(group, kerbB, 0, 0.04,  TILE / 2 - 0.1);
 
-    // Dashed centre line
-    for (let x = -HALF_W + 1; x <= HALF_W - 1; x++) {
-      const mark = box(0.72, 0.01, 0.18, M.white);
+    // Dashed centre line — spans the full terrain width
+    const halfTiles = Math.ceil(GRID_W / 2);
+    for (let x = -halfTiles; x <= halfTiles; x++) {
+      const mark = box(0.72, 0.01, 0.18, M.roadLine);
       addAt(group, mark, x * TILE - TILE / 2, 0.01, 0);
     }
 
@@ -466,8 +518,9 @@ function buildRow(r) {
     bed.receiveShadow = true;
     addAt(group, bed, 0, -0.13, 0);
 
-    // Wooden ties (sleepers) across the track
-    for (let x = -HALF_W - 2; x <= HALF_W + 2; x++) {
+    // Ties (sleepers) across the track — span the full terrain width
+    const tieCount = Math.ceil(GRID_W * 2);
+    for (let x = -tieCount; x <= tieCount; x++) {
       const tie = box(0.35, 0.08, TILE * 0.82, M.railTie);
       addAt(group, tie, x * TILE * 0.5, 0.02, 0);
     }
@@ -501,7 +554,7 @@ function buildRow(r) {
       trainState: 'idle',           // idle → warning → passing → idle
       timer: 1.5 + rng() * 4,       // time until next warning
       warnDuration: 1.6,            // how long lights flash before train
-      trainSpeed: (0.12 + rng() * 0.05) * TILE,  // fast
+      trainSpeed: (0.20 + rng() * 0.08) * TILE,  // laser — very fast
       trainX: 0,
     };
     rowData[r] = rd;
@@ -569,34 +622,36 @@ for (let r = -LOOK_BEHIND; r <= LOOK_AHEAD; r++) { buildRow(r); if (r > maxBuilt
 // ─────────────────────────────────────────────────────────────────
 //  FENCE  (ring-buffer segments that scroll with the player)
 // ─────────────────────────────────────────────────────────────────
-// Side fences: posts + rails running along Z at x = ±FENCE_X
-// Back fence:  a single horizontal wall segment that sits one row
-//              behind the player's furthest-back position, running
-//              along X between the two side fences.
+// Side barriers: rock clusters running along Z at x = ±FENCE_X
+// Back barrier:  rock clusters running along X, one row behind start.
 
 const NUM_FENCE_SEGS = LOOK_AHEAD + LOOK_BEHIND + 8;
 const fenceSegments  = { left: [], right: [] };
 
-function makeFenceSegment() {
+// A cluster of jagged boulders filling one TILE length. `axis` = 'z' makes
+// the cluster run along Z (side barriers); 'x' runs along X (back barrier).
+// `seed` varies the shapes so the wall isn't repetitive.
+function makeRockCluster(axis, seed) {
   const g = new THREE.Group();
-  // Post
-  const post = box(0.18, 1.1, 0.18, M.fencePost);
-  post.position.set(0, 0.55, 0);
-  g.add(post);
-  // Pointed cap
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 4), M.fenceCap);
-  cap.rotation.y = Math.PI / 4;
-  cap.position.set(0, 1.24, 0);
-  cap.castShadow = true;
-  g.add(cap);
-  // Two rails extending in +Z direction to bridge to next post
-  const railTop = box(0.08, 0.10, TILE, M.fenceRail);
-  railTop.position.set(0, 0.85, TILE / 2);
-  g.add(railTop);
-  const railBot = box(0.08, 0.10, TILE, M.fenceRail);
-  railBot.position.set(0, 0.38, TILE / 2);
-  g.add(railBot);
-  g.castShadow = true;
+  const rnd = seededRand(seed * 131 + 7);
+  const count = 4 + Math.floor(rnd() * 3);
+  for (let i = 0; i < count; i++) {
+    const along = (i / count - 0.5) * TILE + (rnd() - 0.5) * 0.25;
+    const rsz   = 0.32 + rnd() * 0.34;
+    const rockMat = rnd() < 0.5 ? M.fencePost : (rnd() < 0.5 ? M.fenceRail : M.fenceCap);
+    const rock  = new THREE.Mesh(new THREE.DodecahedronGeometry(rsz, 0), rockMat);
+    rock.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3);
+    rock.castShadow = rock.receiveShadow = true;
+    const off = (rnd() - 0.5) * 0.3;
+    if (axis === 'z') rock.position.set(off, rsz * 0.6, along);
+    else              rock.position.set(along, rsz * 0.6, off);
+    g.add(rock);
+  }
+  return g;
+}
+
+function makeFenceSegment() {
+  const g = makeRockCluster('z', Math.floor(Math.random() * 100000));
   scene.add(g);
   return g;
 }
@@ -616,25 +671,9 @@ scene.add(backFenceGroup);
 
 for (let i = 0; i < BACK_FENCE_POSTS; i++) {
   const px = -FENCE_X + i * TILE;
-  // Post
-  const post = box(0.18, 1.1, 0.18, M.fencePost);
-  post.position.set(px, 0.55, 0);
-  backFenceGroup.add(post);
-  // Cap
-  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 4), M.fenceCap);
-  cap.rotation.y = Math.PI / 4;
-  cap.position.set(px, 1.24, 0);
-  cap.castShadow = true;
-  backFenceGroup.add(cap);
-  // Rails bridging to next post (along +X)
-  if (i < BACK_FENCE_POSTS - 1) {
-    const rTop = box(TILE, 0.10, 0.08, M.fenceRail);
-    rTop.position.set(px + TILE / 2, 0.85, 0);
-    backFenceGroup.add(rTop);
-    const rBot = box(TILE, 0.10, 0.08, M.fenceRail);
-    rBot.position.set(px + TILE / 2, 0.38, 0);
-    backFenceGroup.add(rBot);
-  }
+  const cluster = makeRockCluster('x', i + 1);
+  cluster.position.set(px, 0, 0);
+  backFenceGroup.add(cluster);
 }
 
 // Back fence is a PERMANENT wall one row behind the start (row 0).
@@ -677,61 +716,76 @@ const FACE = {
 };
 const IDLE_FACE = Math.PI;
 
+// GREEN ALIEN. Built with local +Z = facing direction (same convention
+// as before so all movement/facing logic is unchanged). `body` and `head`
+// remain named the same because the jump animation tilts them.
 const chicken = new THREE.Group();
 scene.add(chicken);
 
-// ── Body ──────────────────────────────────────
-const body = box(0.72, 0.65, 0.60, M.chickenWht);
-addAt(chicken, body, 0, 0.72, 0);
+// ── Body ── slim torso ────────────────────────
+const body = box(0.62, 0.66, 0.5, M.chickenWht);
+addAt(chicken, body, 0, 0.70, 0);
 
-// Breast bump
-const breast = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 7), M.chickenWht);
-breast.scale.set(1, 0.9, 0.85);
+// Belly plate (lighter green)
+const breast = new THREE.Mesh(new THREE.SphereGeometry(0.3, 9, 8), M.beak);
+breast.scale.set(0.85, 1.0, 0.6);
 breast.castShadow = true;
-addAt(chicken, breast, 0, 0.70, 0.22);
+addAt(chicken, breast, 0, 0.66, 0.20);
 
-// ── Head ──────────────────────────────────────
-const head = box(0.52, 0.48, 0.50, M.chickenWht);
-addAt(chicken, head, 0, 1.31, 0.10);
+// ── Head ── big rounded alien cranium ─────────
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 12), M.chickenWht);
+head.scale.set(1.05, 1.15, 1.0);   // tall egg-shaped skull
+head.castShadow = true;
+addAt(chicken, head, 0, 1.42, 0.06);
 
-// Comb (3 bumps)
-addAt(chicken, box(0.14, 0.22, 0.12, M.red),  0, 1.64, -0.02);
-addAt(chicken, box(0.12, 0.28, 0.11, M.red),  0, 1.70,  0.06);
-addAt(chicken, box(0.10, 0.20, 0.10, M.red),  0, 1.63,  0.15);
+// Jaw / chin taper
+const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), M.chickenWht);
+jaw.scale.set(0.9, 0.7, 0.9);
+addAt(chicken, jaw, 0, 1.15, 0.14);
 
-// Wattle
-const wattle = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), M.red);
-wattle.scale.y = 1.3;
-addAt(chicken, wattle, 0, 1.10, 0.27);
-
-// Beak
-addAt(chicken, box(0.18, 0.10, 0.22, M.beak), 0, 1.26, 0.34);
-
-// Eyes
+// ── Big black almond alien eyes ───────────────
 for (const side of [-1, 1]) {
-  addAt(chicken, new THREE.Mesh(new THREE.SphereGeometry(0.075, 7, 7), M.chickenWht),
-        side * 0.21, 1.36, 0.27);
-  addAt(chicken, new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), M.black),
-        side * 0.235, 1.36, 0.31);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10), M.black);
+  eye.scale.set(0.7, 1.25, 0.5);       // tall almond shape
+  eye.rotation.z = side * 0.35;        // slant outward
+  addAt(chicken, eye, side * 0.19, 1.46, 0.34);
+  // tiny glossy highlight
+  const glint = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), M.trainWin);
+  addAt(chicken, glint, side * 0.16, 1.52, 0.44);
 }
 
-// Wings
+// Small mouth line (pale green)
+addAt(chicken, box(0.16, 0.03, 0.05, M.beak), 0, 1.20, 0.42);
+
+// ── Antennae (replace comb) ───────────────────
 for (const side of [-1, 1]) {
-  const wing = box(0.12, 0.42, 0.50, M.cream);
-  wing.rotation.z = side * 0.18;
-  addAt(chicken, wing, side * 0.43, 0.75, 0.02);
+  const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.42, 6), M.red);
+  stalk.rotation.z = side * 0.28;
+  stalk.castShadow = true;
+  addAt(chicken, stalk, side * 0.14, 1.86, 0.02);
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), M.antennaTip);
+  addAt(chicken, orb, side * 0.24, 2.08, 0.02);
 }
 
-// Tail feathers
-const tailFeather = box(0.38, 0.32, 0.14, M.cream);
-tailFeather.rotation.x = -0.5;
-addAt(chicken, tailFeather, 0, 0.95, -0.36);
-
-// Legs
+// ── Arms (replace wings) — slim green limbs ───
 for (const side of [-1, 1]) {
-  addAt(chicken, box(0.10, 0.28, 0.10, M.orange), side * 0.18, 0.30, 0.00);
-  addAt(chicken, box(0.08, 0.22, 0.08, M.beak),   side * 0.18, 0.10, 0.04);
-  addAt(chicken, box(0.08, 0.05, 0.22, M.beak),   side * 0.18, 0.01, 0.08);
+  const arm = box(0.12, 0.44, 0.14, M.cream);
+  arm.rotation.z = side * 0.12;
+  addAt(chicken, arm, side * 0.40, 0.66, 0.04);
+  // three-finger hand
+  const hand = new THREE.Mesh(new THREE.SphereGeometry(0.09, 7, 6), M.beak);
+  addAt(chicken, hand, side * 0.45, 0.42, 0.06);
+}
+
+// ── Little back fin (replace tail) ────────────
+const tailFeather = box(0.30, 0.28, 0.10, M.cream);
+tailFeather.rotation.x = -0.4;
+addAt(chicken, tailFeather, 0, 0.86, -0.30);
+
+// ── Legs — green with pale feet ───────────────
+for (const side of [-1, 1]) {
+  addAt(chicken, box(0.11, 0.30, 0.11, M.orange), side * 0.17, 0.30, 0.00);
+  addAt(chicken, box(0.10, 0.10, 0.24, M.beak),   side * 0.17, 0.05, 0.06); // foot
 }
 
 // ── Drop shadow (blob on ground) ─────────────
@@ -917,6 +971,8 @@ function updateCamera() {
   camera.position.lerp(_camTarget, 0.09);
   camLookAt.lerp(chicken.position, 0.09);
   camera.lookAt(camLookAt);
+  // Keep the starfield centred on the player so it never runs out
+  if (window.__stars) window.__stars.position.set(chicken.position.x, 0, chicken.position.z);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -998,6 +1054,9 @@ function updateRail(rd, dtSec) {
   } else if (rd.trainState === 'passing') {
     rd.trainX += rd.trainSpeed * rd.dir * (dtSec * 60); // frame-rate independent
     rd.train.position.x = rd.trainX;
+    // Pulse the beam thickness for an energetic laser feel
+    const pulse = 1 + Math.sin(performance.now() * 0.03) * 0.12;
+    rd.train.scale.set(1, pulse, pulse);
     const len = rd.train.userData.length;
     // Off the far edge?
     const gone = rd.dir > 0 ? rd.trainX > bound + len : rd.trainX < -bound - len;
@@ -1033,7 +1092,10 @@ function animate(now) {
           car.position.x += spd * rd.dir;
           if (car.position.x >  bound) car.position.x = -bound;
           if (car.position.x < -bound) car.position.x =  bound;
-          car.rotation.y = rd.dir > 0 ? 0 : Math.PI;
+          // UFOs slowly spin and bob rather than flipping direction
+          car.userData.spin = (car.userData.spin || 0) + 0.04;
+          car.rotation.y = car.userData.spin;
+          car.position.y = Math.sin(shimmerT * 2 + car.position.x * 0.3) * 0.06;
         }
       }
       if (rd.type === 'water') {
@@ -1043,6 +1105,8 @@ function animate(now) {
           log.position.x += spd * rd.dir;
           if (log.position.x >  bound + hl) log.position.x = -bound - hl;
           if (log.position.x < -bound - hl) log.position.x =  bound + hl;
+          // Gently bob the rock on the liquid surface
+          log.position.y = Math.sin(shimmerT * 1.6 + log.position.x * 0.4) * 0.05;
         }
       }
       if (rd.type === 'rail') {
