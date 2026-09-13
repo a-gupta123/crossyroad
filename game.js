@@ -8,8 +8,9 @@ const GRID_W      = 40;           // very wide — terrain always bleeds past sc
 const HALF_W      = 8;            // playable column bound (±8), independent of visual width
 const JUMP_DUR    = 185;          // ms
 const JUMP_H      = 1.7;
-const LOOK_AHEAD  = 22;
-const LOOK_BEHIND = 8;
+const LOOK_AHEAD  = 20;
+const LOOK_BEHIND = 12;           // build rows behind player too
+const FENCE_X     = HALF_W * TILE + 0.5;   // world X of each fence line
 
 // Camera angle: ~30° from the Z-axis horizontally (shallower than 45°).
 // atan(X/Z) = 30°  →  X = Z * tan(30°) ≈ Z * 0.577
@@ -114,6 +115,10 @@ const M = {
   // FX
   shadowMat:  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
   roadLine:   mat(0xdddddd),
+  // Fence
+  fencePost:  mat(0xc8a060),
+  fenceRail:  mat(0xd4b070),
+  fenceCap:   mat(0xe0c080),
 };
 const CAR_COLORS = [M.carRed, M.carBlue, M.carYellow, M.carGreen, M.carWhite, M.carOrange, M.carPurple];
 
@@ -419,12 +424,19 @@ function buildRow(r) {
 }
 
 function ensureTerrain(pRow) {
-  const needed = pRow + LOOK_AHEAD;
+  const needed  = pRow + LOOK_AHEAD;
+  const behind  = pRow - LOOK_BEHIND;
+  // Build forward
   for (let r = maxBuiltRow + 1; r <= needed; r++) {
     buildRow(r);
     maxBuiltRow = r;
   }
-  const cutoff = pRow - LOOK_BEHIND - 2;
+  // Build backward (handles negative rows too — all treated as grass)
+  for (let r = behind; r < maxBuiltRow; r++) {
+    buildRow(r);
+  }
+  // Cleanup rows far outside visible range
+  const cutoff = behind - 3;
   for (const key of Object.keys(rowData)) {
     const ri = parseInt(key);
     if (ri < cutoff) {
@@ -434,8 +446,69 @@ function ensureTerrain(pRow) {
   }
 }
 
-// Build initial rows
-for (let r = 0; r <= LOOK_AHEAD; r++) { buildRow(r); maxBuiltRow = r; }
+// Build initial rows (forward and a few behind)
+for (let r = -LOOK_BEHIND; r <= LOOK_AHEAD; r++) { buildRow(r); if (r > maxBuiltRow) maxBuiltRow = r; }
+
+// ─────────────────────────────────────────────────────────────────
+//  FENCE  (ring-buffer of post+rail segments that follow the camera)
+// ─────────────────────────────────────────────────────────────────
+// Each fence segment spans TILE world units in Z and contains:
+//   - 1 post at the back edge
+//   - 2 horizontal rails connecting to the next post
+// We keep a pool of NUM_FENCE_SEGS segments per side and reposition
+// them as the player moves, so geometry count stays constant.
+
+const NUM_FENCE_SEGS = LOOK_AHEAD + LOOK_BEHIND + 6;
+const fenceSegments  = { left: [], right: [] };
+
+function makeFenceSegment() {
+  const g = new THREE.Group();
+
+  // Post
+  const post = box(0.18, 1.1, 0.18, M.fencePost);
+  post.position.set(0, 0.55, 0);
+  g.add(post);
+
+  // Pointed cap
+  const cap = new THREE.Mesh(
+    new THREE.ConeGeometry(0.13, 0.28, 4),
+    M.fenceCap
+  );
+  cap.rotation.y = Math.PI / 4;
+  cap.position.set(0, 1.24, 0);
+  cap.castShadow = true;
+  g.add(cap);
+
+  // Two rails extending in -Z direction (toward next post, one TILE away)
+  const railTop = box(0.08, 0.1, TILE, M.fenceRail);
+  railTop.position.set(0, 0.85, -TILE / 2);
+  g.add(railTop);
+
+  const railBot = box(0.08, 0.1, TILE, M.fenceRail);
+  railBot.position.set(0, 0.38, -TILE / 2);
+  g.add(railBot);
+
+  g.castShadow = true;
+  scene.add(g);
+  return g;
+}
+
+// Build the pool
+for (let i = 0; i < NUM_FENCE_SEGS; i++) {
+  fenceSegments.left.push(makeFenceSegment());
+  fenceSegments.right.push(makeFenceSegment());
+}
+
+// Position every segment based on playerRow. Called each frame.
+function updateFence() {
+  const base = playerRow - LOOK_BEHIND - 1;
+  for (let i = 0; i < NUM_FENCE_SEGS; i++) {
+    const rowIdx = base + i;
+    const worldZ = -rowIdx * TILE;
+    fenceSegments.left[i].position.set(-FENCE_X, 0, worldZ);
+    fenceSegments.right[i].position.set( FENCE_X, 0, worldZ);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────
 //  CHICKEN
@@ -572,7 +645,8 @@ function startJump(dir) {
 
   if (dir === 'left'  && newCol === playerCol) return;
   if (dir === 'right' && newCol === playerCol) return;
-  if (newRow < 0) return;
+  // no hard floor on backward movement — fence/boundary handles left/right,
+  // player can walk back freely
 
   playerRow = newRow;
   playerCol = newCol;
@@ -669,6 +743,7 @@ function restartGame() {
   camera.position.copy(CAM_OFFSET);
   camLookAt.set(0, 0, 0);
   camera.lookAt(camLookAt);
+  updateFence();
 }
 
 document.getElementById('restart-btn').addEventListener('click', restartGame);
@@ -831,6 +906,7 @@ function animate(now) {
     shadowBlob.material.opacity = 0.22 * s;
   }
 
+  updateFence();
   updateCamera();
   renderer.render(scene, camera);
 }
