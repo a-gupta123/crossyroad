@@ -152,8 +152,8 @@ function rowType(r) {
   if (r <= 2) return 'grass';
   const rng  = seededRand(r * 997 + 17);
   const roll = rng();
-  if (roll < 0.35) return 'grass';
-  if (roll < 0.68) return 'road';
+  if (roll < 0.50) return 'grass';
+  if (roll < 0.85) return 'road';
   return 'water';
 }
 
@@ -454,10 +454,10 @@ for (let r = 0; r <= LOOK_AHEAD; r++) { buildRow(r); maxBuiltRow = r; }
 // The FACE table maps each move direction to the correct world-space Y rotation.
 
 const FACE = {
-  forward:  Math.PI,           // local +Z → world -Z  (screen top)
-  backward: 0,                 // local +Z → world +Z  (screen bottom)
-  left:     Math.PI / 2,       // local +Z → world -X  (screen left)
-  right:    Math.PI * 1.5,     // local +Z → world +X  (screen right) — use 270° not -90° so lerp always takes short path from π
+  forward:  Math.PI,       // local +Z → world -Z  (screen top)
+  backward: 0,             // local +Z → world +Z  (screen bottom)
+  left:     Math.PI * 1.5, // local +Z → world -X  — 270° so lerp from π goes CCW (+π/2) ✓
+  right:    Math.PI * 0.5, // local +Z → world +X  — 90°  so lerp from π goes CW  (-π/2) ✓
 };
 const IDLE_FACE = Math.PI;
 
@@ -751,7 +751,7 @@ function animate(now) {
           car.position.x += spd * rd.dir;
           if (car.position.x >  bound) car.position.x = -bound;
           if (car.position.x < -bound) car.position.x =  bound;
-          car.rotation.y = rd.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+          car.rotation.y = rd.dir > 0 ? 0 : Math.PI;
         }
       }
       if (rd.type === 'water') {
