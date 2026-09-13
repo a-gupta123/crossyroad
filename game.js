@@ -446,68 +446,93 @@ function ensureTerrain(pRow) {
   }
 }
 
-// Build initial rows (forward and a few behind)
+// Build initial rows (forward and behind)
 for (let r = -LOOK_BEHIND; r <= LOOK_AHEAD; r++) { buildRow(r); if (r > maxBuiltRow) maxBuiltRow = r; }
 
 // ─────────────────────────────────────────────────────────────────
-//  FENCE  (ring-buffer of post+rail segments that follow the camera)
+//  FENCE  (ring-buffer segments that scroll with the player)
 // ─────────────────────────────────────────────────────────────────
-// Each fence segment spans TILE world units in Z and contains:
-//   - 1 post at the back edge
-//   - 2 horizontal rails connecting to the next post
-// We keep a pool of NUM_FENCE_SEGS segments per side and reposition
-// them as the player moves, so geometry count stays constant.
+// Side fences: posts + rails running along Z at x = ±FENCE_X
+// Back fence:  a single horizontal wall segment that sits one row
+//              behind the player's furthest-back position, running
+//              along X between the two side fences.
 
-const NUM_FENCE_SEGS = LOOK_AHEAD + LOOK_BEHIND + 6;
+const NUM_FENCE_SEGS = LOOK_AHEAD + LOOK_BEHIND + 8;
 const fenceSegments  = { left: [], right: [] };
 
 function makeFenceSegment() {
   const g = new THREE.Group();
-
   // Post
   const post = box(0.18, 1.1, 0.18, M.fencePost);
   post.position.set(0, 0.55, 0);
   g.add(post);
-
   // Pointed cap
-  const cap = new THREE.Mesh(
-    new THREE.ConeGeometry(0.13, 0.28, 4),
-    M.fenceCap
-  );
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 4), M.fenceCap);
   cap.rotation.y = Math.PI / 4;
   cap.position.set(0, 1.24, 0);
   cap.castShadow = true;
   g.add(cap);
-
-  // Two rails extending in -Z direction (toward next post, one TILE away)
-  const railTop = box(0.08, 0.1, TILE, M.fenceRail);
-  railTop.position.set(0, 0.85, -TILE / 2);
+  // Two rails extending in +Z direction to bridge to next post
+  const railTop = box(0.08, 0.10, TILE, M.fenceRail);
+  railTop.position.set(0, 0.85, TILE / 2);
   g.add(railTop);
-
-  const railBot = box(0.08, 0.1, TILE, M.fenceRail);
-  railBot.position.set(0, 0.38, -TILE / 2);
+  const railBot = box(0.08, 0.10, TILE, M.fenceRail);
+  railBot.position.set(0, 0.38, TILE / 2);
   g.add(railBot);
-
   g.castShadow = true;
   scene.add(g);
   return g;
 }
 
-// Build the pool
+// Build side-fence pools
 for (let i = 0; i < NUM_FENCE_SEGS; i++) {
   fenceSegments.left.push(makeFenceSegment());
   fenceSegments.right.push(makeFenceSegment());
 }
 
-// Position every segment based on playerRow. Called each frame.
+// ── Back fence ───────────────────────────────
+// A row of posts + rails running along X, placed at the back boundary.
+// We make enough posts to span the full playable width (2*HALF_W columns).
+const BACK_FENCE_POSTS = HALF_W * 2 + 2;
+const backFenceGroup = new THREE.Group();
+scene.add(backFenceGroup);
+
+for (let i = 0; i < BACK_FENCE_POSTS; i++) {
+  const px = -FENCE_X + i * TILE;
+  // Post
+  const post = box(0.18, 1.1, 0.18, M.fencePost);
+  post.position.set(px, 0.55, 0);
+  backFenceGroup.add(post);
+  // Cap
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 4), M.fenceCap);
+  cap.rotation.y = Math.PI / 4;
+  cap.position.set(px, 1.24, 0);
+  cap.castShadow = true;
+  backFenceGroup.add(cap);
+  // Rails bridging to next post (along +X)
+  if (i < BACK_FENCE_POSTS - 1) {
+    const rTop = box(TILE, 0.10, 0.08, M.fenceRail);
+    rTop.position.set(px + TILE / 2, 0.85, 0);
+    backFenceGroup.add(rTop);
+    const rBot = box(TILE, 0.10, 0.08, M.fenceRail);
+    rBot.position.set(px + TILE / 2, 0.38, 0);
+    backFenceGroup.add(rBot);
+  }
+}
+
+// Update all fence positions — call every frame and at startup
 function updateFence() {
+  // Side fences: one segment per row, spanning from well behind to well ahead
   const base = playerRow - LOOK_BEHIND - 1;
   for (let i = 0; i < NUM_FENCE_SEGS; i++) {
-    const rowIdx = base + i;
-    const worldZ = -rowIdx * TILE;
+    const worldZ = -(base + i) * TILE;
     fenceSegments.left[i].position.set(-FENCE_X, 0, worldZ);
     fenceSegments.right[i].position.set( FENCE_X, 0, worldZ);
   }
+  // Back fence: sits one row behind the start (row 0), fixed at Z = TILE
+  // so it's always just behind where the chicken began
+  const backZ = -(playerRow - LOOK_BEHIND) * TILE + TILE;
+  backFenceGroup.position.set(0, 0, backZ);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -619,8 +644,7 @@ function placeChickenAt(row, col) {
   chicken.rotation.y = IDLE_FACE;
 }
 placeChickenAt(0, 0);
-
-// ── Jump state ────────────────────────────────
+updateFence(); // position fences immediately so first frame has no blue gaps
 let jumping   = false;
 let jumpStart = 0;
 let jumpFrom  = new THREE.Vector3();
@@ -737,7 +761,7 @@ function restartGame() {
   ridingLog  = null;
   dead       = false;
 
-  for (let r = 0; r <= LOOK_AHEAD; r++) { buildRow(r); maxBuiltRow = r; }
+  for (let r = -LOOK_BEHIND; r <= LOOK_AHEAD; r++) { buildRow(r); if (r > maxBuiltRow) maxBuiltRow = r; }
   placeChickenAt(0, 0);
 
   camera.position.copy(CAM_OFFSET);
