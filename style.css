@@ -1,0 +1,96 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #1a1a2e;
+  overflow: hidden;
+  font-family: 'Arial Rounded MT Bold', Arial, sans-serif;
+}
+
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Score (top-right) ── */
+#score-box {
+  position: absolute;
+  top: 22px;
+  right: 28px;
+  background: rgba(0,0,0,0.45);
+  border-radius: 12px;
+  padding: 6px 22px;
+  pointer-events: none;
+}
+
+#score {
+  color: #ffffff;
+  font-size: 42px;
+  font-weight: bold;
+  text-shadow: 0 3px 0 #000;
+  letter-spacing: 2px;
+}
+
+/* ── Death screen ── */
+#death-screen {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.62);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+#death-screen.visible {
+  display: flex;
+}
+
+#death-title {
+  color: #ff4444;
+  font-size: 64px;
+  font-weight: bold;
+  text-shadow: 0 4px 0 #800;
+  letter-spacing: 4px;
+}
+
+#death-score-label {
+  color: rgba(255,255,255,0.7);
+  font-size: 20px;
+  letter-spacing: 2px;
+  margin-top: 8px;
+}
+
+#death-score {
+  color: #ffffff;
+  font-size: 52px;
+  font-weight: bold;
+  text-shadow: 0 3px 0 #333;
+}
+
+#restart-btn {
+  margin-top: 20px;
+  padding: 14px 44px;
+  font-size: 22px;
+  font-family: inherit;
+  font-weight: bold;
+  background: #f5c518;
+  color: #111;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 5px 0 #a07800;
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+
+#restart-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #a07800;
+}
