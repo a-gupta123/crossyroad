@@ -4,23 +4,21 @@
 
 // ── Constants ────────────────────────────────────────────────────
 const TILE        = 2;
-const GRID_W      = 22;           // wide enough to always overfill screen
-const HALF_W      = Math.floor(GRID_W / 2);   // 11
+const GRID_W      = 40;           // very wide — terrain always bleeds past screen edges
+const HALF_W      = 8;            // playable column bound (±8), independent of visual width
 const JUMP_DUR    = 185;          // ms
 const JUMP_H      = 1.7;
 const LOOK_AHEAD  = 22;
 const LOOK_BEHIND = 8;
 
-// The camera sits at this offset from whatever it's looking at.
-// We use a fixed 45-degree iso angle (equal X & Z offset).
-const CAM_DIST  = 14;
-const CAM_HIGH  = 20;
-const CAM_OFFSET = new THREE.Vector3(CAM_DIST, CAM_HIGH, CAM_DIST);
+// Camera angle: ~30° from the Z-axis horizontally (shallower than 45°).
+// atan(X/Z) = 30°  →  X = Z * tan(30°) ≈ Z * 0.577
+// Keep Y high enough for a clear top-down view.
+const CAM_OFFSET = new THREE.Vector3(8, 22, 20);
 
-// Orthographic half-height in world units.
-// GRID_W*TILE = 44 world units wide — well beyond any screen.
-// CAM_SIZE=11 gives a comfortable playing view.
-const CAM_SIZE = 11;
+// Orthographic half-height — controls zoom level.
+// Larger = zoomed out, smaller = zoomed in.
+const CAM_SIZE = 12;
 
 // ── Renderer ─────────────────────────────────────────────────────
 const canvas   = document.getElementById('game-canvas');
@@ -60,8 +58,8 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0005;
 const sc = sun.shadow.camera;
-sc.near = 1; sc.far = 100;
-sc.left = -55; sc.right = 55; sc.top = 55; sc.bottom = -55;
+sc.near = 1; sc.far = 120;
+sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70;
 scene.add(sun);
 
 // Cool blue fill from opposite side
