@@ -873,7 +873,11 @@ function checkCollisions() {
   if (rd.type === 'road') {
     for (const car of rd.cars) {
       const hl = (car.userData.halfLen || 0.75) + 0.15;
-      if (Math.abs(car.position.x - cx) < hl) { triggerDeath(); return; }
+      if (Math.abs(car.position.x - cx) < hl) {
+        // Knocked over in the direction the saucer was travelling
+        triggerDeath('ufo', { dir: rd.dir });
+        return;
+      }
     }
   }
 
@@ -886,7 +890,7 @@ function checkCollisions() {
       const back  = rd.trainX + (rd.dir > 0 ? len : -len);
       const lo = Math.min(front, back);
       const hi = Math.max(front, back);
-      if (cx > lo - 0.3 && cx < hi + 0.3) { triggerDeath(); return; }
+      if (cx > lo - 0.3 && cx < hi + 0.3) { triggerDeath('laser'); return; }
     }
   }
 
@@ -899,28 +903,299 @@ function checkCollisions() {
         break;
       }
     }
-    if (!onLog) triggerDeath();
+    if (!onLog) triggerDeath('drown');
   }
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  DEATH
+//  DEATH  —  four distinct animations
 // ─────────────────────────────────────────────────────────────────
-function triggerDeath() {
-  if (dead) return;
-  dead    = true;
-  jumping = false;
-  inputQueue = [];
+//   'ufo'    → knocked flat in the direction the saucer was travelling
+//   'laser'  → disintegrates into glowing fragments
+//   'drown'  → sinks into the green liquid with ripples
+//   'abduct' → a UFO descends and tractor-beams the alien away
+//
+// All four are driven per-frame from the main loop via updateDeathAnim()
+// so they stay in sync with rendering.
 
-  let t = 0;
-  const startY = chicken.position.y;
-  const iv = setInterval(() => {
-    t += 0.055;
-    chicken.rotation.y += 0.22;
-    chicken.position.y  = Math.max(startY - t * 0.5, startY - 1.5);
-    chicken.scale.setScalar(Math.max(0.01, 1 - t * 0.55));
-    if (t >= 1.9) { clearInterval(iv); showDeathScreen(); }
-  }, 16);
+let deathCause = null;
+let deathT     = 0;      // seconds since death began
+let deathDur   = 1.5;    // total animation length
+let deathDone  = false;
+const deathProps = new THREE.Group();  // holds particles / ripples / abduction UFO
+scene.add(deathProps);
+
+let deathHitDir = 1;     // for 'ufo': direction of the knock
+let deathStartY = 0;
+
+function clearDeathProps() {
+  while (deathProps.children.length) {
+    const c = deathProps.children.pop();
+    c.traverse?.((n) => {
+      if (n.geometry) n.geometry.dispose?.();
+      if (n.material && n.material !== undefined && n.material.dispose && n.material.__isClone) {
+        n.material.dispose();
+      }
+    });
+    deathProps.remove(c);
+  }
+}
+
+// A translucent clone we can fade without touching shared materials
+function fadeClone(baseColor) {
+  const m = new THREE.MeshBasicMaterial({
+    color: baseColor, transparent: true, opacity: 1, depthWrite: false,
+  });
+  m.__isClone = true;
+  return m;
+}
+
+function triggerDeath(cause = 'ufo', opts = {}) {
+  if (dead) return;
+  dead       = true;
+  jumping    = false;
+  inputQueue = [];
+  ridingLog  = null;
+  // Stop the landing-bounce tween so it can't fight the death animation
+  if (bumpIv) { clearInterval(bumpIv); bumpIv = null; }
+  chicken.scale.setScalar(1);
+
+  deathCause  = cause;
+  deathT      = 0;
+  deathDone   = false;
+  deathStartY = chicken.position.y;
+  clearDeathProps();
+
+  if (cause === 'ufo') {
+    deathDur    = 1.5;
+    deathHitDir = opts.dir >= 0 ? 1 : -1;
+    // Face forward so the topple axis is well defined (a violent hit —
+    // the snap isn't noticeable)
+    chicken.rotation.y = Math.PI;
+
+  } else if (cause === 'laser') {
+    deathDur = 1.4;
+    // Burst of glowing fragments
+    for (let i = 0; i < 22; i++) {
+      const size = 0.10 + Math.random() * 0.13;
+      const frag = new THREE.Mesh(
+        new THREE.BoxGeometry(size, size, size),
+        fadeClone(Math.random() < 0.5 ? 0x4fd06a : 0xff88bb)
+      );
+      frag.position.set(
+        chicken.position.x + (Math.random() - 0.5) * 0.5,
+        chicken.position.y + 0.5 + Math.random() * 1.2,
+        chicken.position.z + (Math.random() - 0.5) * 0.5
+      );
+      frag.userData.vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 6.0,
+         Math.random() * 4.5 + 1.0,
+        (Math.random() - 0.5) * 6.0
+      );
+      frag.userData.spin = new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8);
+      deathProps.add(frag);
+    }
+    // Bright flash at the impact point
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 12), fadeClone(0xffffff));
+    flash.position.set(chicken.position.x, chicken.position.y + 0.9, chicken.position.z);
+    flash.userData.isFlash = true;
+    deathProps.add(flash);
+
+  } else if (cause === 'drown') {
+    deathDur = 1.9;
+    // Expanding ripple rings on the liquid surface
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.25, 0.38, 20),
+        fadeClone(0x6ff08a)
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(chicken.position.x, 0.08, chicken.position.z);
+      ring.userData.delay = i * 0.28;
+      ring.userData.isRipple = true;
+      deathProps.add(ring);
+    }
+    // A few rising bubbles
+    for (let i = 0; i < 6; i++) {
+      const b = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07 + Math.random() * 0.06, 7, 6),
+        fadeClone(0x9cf0b0)
+      );
+      b.position.set(
+        chicken.position.x + (Math.random() - 0.5) * 0.5,
+        -0.3 - Math.random() * 0.5,
+        chicken.position.z + (Math.random() - 0.5) * 0.5
+      );
+      b.userData.isBubble = true;
+      b.userData.rise = 0.7 + Math.random() * 0.8;
+      deathProps.add(b);
+    }
+
+  } else if (cause === 'abduct') {
+    deathDur = 3.0;
+    // The alien is off the bottom of the screen at this point, so pull the
+    // camera back onto it (the creep is already halted by `dead`) — this
+    // makes the abduction visible instead of happening off-screen.
+    camFocusZ = chicken.position.z;
+    camTrackX = chicken.position.x;
+    // Saucer that descends from above
+    const ufo = makeAbductionUFO();
+    ufo.position.set(chicken.position.x, 16, chicken.position.z);
+    ufo.userData.isAbductor = true;
+    deathProps.add(ufo);
+  }
+}
+
+// A larger, menacing saucer used for the abduction sequence
+function makeAbductionUFO() {
+  const g = new THREE.Group();
+  const R = 1.9;
+  const topCone = new THREE.Mesh(new THREE.ConeGeometry(R, 0.6, 24), M.carWhite);
+  topCone.position.y = 0.16;
+  g.add(topCone);
+  const botCone = new THREE.Mesh(new THREE.ConeGeometry(R, 0.75, 24), M.carBlue);
+  botCone.rotation.x = Math.PI;
+  botCone.position.y = -0.24;
+  g.add(botCone);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(R * 0.93, 0.12, 8, 26), M.rim);
+  rim.rotation.x = Math.PI / 2;
+  g.add(rim);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.75, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), M.ufoDome
+  );
+  dome.position.y = 0.3;
+  g.add(dome);
+  // Rim lights
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 7, 7), M.ufoGlow);
+    orb.position.set(Math.cos(a) * R * 0.72, -0.34, Math.sin(a) * R * 0.72);
+    g.add(orb);
+  }
+  // Tractor beam cone (grows during the lift) — stored for animation
+  const beam = new THREE.Mesh(
+    new THREE.ConeGeometry(1.15, 1, 20, 1, true),
+    fadeClone(0x66ffcc)
+  );
+  beam.material.opacity = 0.0;
+  beam.rotation.x = Math.PI;
+  g.add(beam);
+  g.userData.beam = beam;
+  return g;
+}
+
+// ── Per-frame death animation ────────────────────────────────────
+function updateDeathAnim(dtSec) {
+  if (!deathCause || deathDone) return;
+  deathT += dtSec;
+  const p = Math.min(deathT / deathDur, 1);   // 0..1 progress
+
+  if (deathCause === 'ufo') {
+    // Knocked flat in the direction of travel
+    const k = Math.min(p / 0.55, 1);              // topple phase
+    const ease = 1 - Math.pow(1 - k, 3);
+    chicken.rotation.z = deathHitDir * ease * (Math.PI / 2);
+    // Shoved along the direction of impact, decelerating
+    chicken.position.x += deathHitDir * (1 - k) * 7 * dtSec;
+    // Small pop up then settle
+    chicken.position.y = Math.max(0, Math.sin(k * Math.PI) * 0.55);
+    // Squash flat once down
+    if (p > 0.55) {
+      const f = (p - 0.55) / 0.45;
+      chicken.scale.set(1 + f * 0.25, Math.max(0.18, 1 - f * 0.8), 1 + f * 0.15);
+    }
+
+  } else if (deathCause === 'laser') {
+    // Alien vanishes almost immediately
+    const vanish = Math.min(p / 0.18, 1);
+    chicken.scale.setScalar(Math.max(0.001, 1 - vanish));
+    // Fragments fly outward with gravity and fade
+    for (const c of deathProps.children) {
+      if (c.userData.isFlash) {
+        const f = Math.min(p / 0.25, 1);
+        c.scale.setScalar(1 + f * 2.2);
+        c.material.opacity = Math.max(0, 1 - f);
+        continue;
+      }
+      const v = c.userData.vel;
+      if (!v) continue;
+      v.y -= 11 * dtSec;                       // gravity
+      c.position.addScaledVector(v, dtSec);
+      if (c.position.y < 0.08) {               // bounce off the ground
+        c.position.y = 0.08;
+        v.y *= -0.35; v.x *= 0.7; v.z *= 0.7;
+      }
+      const s = c.userData.spin;
+      c.rotation.x += s.x * dtSec;
+      c.rotation.y += s.y * dtSec;
+      c.rotation.z += s.z * dtSec;
+      c.material.opacity = Math.max(0, 1 - p * 1.1);
+    }
+
+  } else if (deathCause === 'drown') {
+    // Sink below the surface, tipping slightly
+    const sink = Math.min(p / 0.7, 1);
+    const ease = sink * sink;
+    chicken.position.y = deathStartY - ease * 2.4;
+    chicken.rotation.z = Math.sin(p * 6) * 0.18;
+    chicken.rotation.x = ease * 0.5;
+    chicken.scale.setScalar(Math.max(0.25, 1 - ease * 0.35));
+    // Ripples expand and fade
+    for (const c of deathProps.children) {
+      if (c.userData.isRipple) {
+        const rt = Math.max(0, deathT - c.userData.delay) / 1.1;
+        if (rt <= 0) { c.material.opacity = 0; continue; }
+        const g = Math.min(rt, 1);
+        c.scale.setScalar(1 + g * 5.5);
+        c.material.opacity = Math.max(0, 0.75 * (1 - g));
+      } else if (c.userData.isBubble) {
+        c.position.y += c.userData.rise * dtSec;
+        if (c.position.y > 0.15) c.position.y = 0.15;
+        c.material.opacity = Math.max(0, 1 - p * 1.2);
+      }
+    }
+
+  } else if (deathCause === 'abduct') {
+    const ufo = deathProps.children.find((c) => c.userData.isAbductor);
+    if (ufo) {
+      const beam = ufo.userData.beam;
+      ufo.rotation.y += 2.2 * dtSec;
+
+      if (p < 0.30) {
+        // Descend from the sky
+        const d = p / 0.30;
+        ufo.position.y = 16 - d * 11.5;        // down to y ≈ 4.5
+        if (beam) beam.material.opacity = 0;
+      } else if (p < 0.75) {
+        // Hover, beam on, alien rises spinning
+        const d = (p - 0.30) / 0.45;
+        ufo.position.y = 4.5 + Math.sin(d * Math.PI * 2) * 0.18;
+        if (beam) {
+          const beamLen = ufo.position.y;
+          beam.scale.set(1, beamLen, 1);
+          beam.position.y = -beamLen / 2;
+          beam.material.opacity = 0.34 + Math.sin(d * 18) * 0.08;
+        }
+        chicken.position.y = deathStartY + d * (ufo.position.y - 1.0);
+        chicken.rotation.y += 7 * dtSec;
+        chicken.rotation.z = Math.sin(d * 7) * 0.25;
+        chicken.scale.setScalar(Math.max(0.35, 1 - d * 0.45));
+      } else {
+        // Zip away upward, alien in tow
+        const d = (p - 0.75) / 0.25;
+        const lift = Math.pow(d, 2) * 26;
+        ufo.position.y = 4.5 + lift;
+        chicken.position.y = deathStartY + (4.5 - 1.0) + lift;
+        chicken.scale.setScalar(Math.max(0.001, 0.55 * (1 - d)));
+        if (beam) beam.material.opacity = Math.max(0, 0.34 * (1 - d * 2));
+      }
+    }
+  }
+
+  if (p >= 1) {
+    deathDone = true;
+    showDeathScreen();
+  }
 }
 
 function showDeathScreen() {
@@ -938,7 +1213,15 @@ function restartGame() {
   document.getElementById('score').textContent = '0';
   document.getElementById('death-screen').classList.remove('visible');
 
+  // Clear any death animation state / props
+  clearDeathProps();
+  deathCause = null;
+  deathDone  = false;
+  deathT     = 0;
+
   chicken.scale.setScalar(1);
+  chicken.rotation.set(0, IDLE_FACE, 0);
+  chicken.position.y = 0;
   body.rotation.x = head.rotation.x = 0;
   jumping = false;
   inputQueue = [];
@@ -973,15 +1256,31 @@ const _lookTarget = new THREE.Vector3();
 
 // Forward is -Z. camFocusZ is the Z the camera is centred on.
 let camFocusZ = 0;
+// Camera X tracking is frozen once the alien dies so the view doesn't
+// lurch while the death animation plays.
+let camTrackX = 0;
 // How fast the view creeps forward (world units per frame at 60fps).
 // Ramps up slightly with score so it gets tenser the further you go.
 const CREEP_BASE = 0.006 * TILE;
-// How far behind the focus the alien may fall before being caught.
-// This is tuned to roughly the bottom edge of the visible play area.
-const KILL_MARGIN = TILE * 4.5;
+
+// Reusable vector for the off-screen test
+const _ndc = new THREE.Vector3();
+// Height of the top of the alien's head — we only count it as "overtaken"
+// once this point has passed below the bottom edge of the screen.
+const ALIEN_TOP_Y = 2.2;
 
 function resetCameraCreep() {
   camFocusZ = 0;
+  camTrackX = 0;
+}
+
+// True only when the alien is COMPLETELY below the bottom edge of the
+// viewport. Uses the real projection matrix rather than a guessed margin,
+// so it adapts to any zoom / camera angle / window size.
+function alienFullyOffBottom() {
+  _ndc.set(chicken.position.x, chicken.position.y + ALIEN_TOP_Y, chicken.position.z);
+  _ndc.project(camera);
+  return _ndc.y < -1;
 }
 
 function updateCamera() {
@@ -994,28 +1293,32 @@ function updateCamera() {
     if (chicken.position.z < camFocusZ) {
       camFocusZ = chicken.position.z;
     }
-
-    // Caught? Alien has fallen behind the bottom edge of the view.
-    if (chicken.position.z > camFocusZ + KILL_MARGIN) {
-      triggerDeath();
-    }
+    camTrackX = chicken.position.x;
   }
 
   // Camera position follows focus in Z, alien in X.
   _camTarget.set(
-    chicken.position.x + CAM_OFFSET.x,
+    camTrackX + CAM_OFFSET.x,
     CAM_OFFSET.y,
     camFocusZ + CAM_OFFSET.z
   );
   camera.position.lerp(_camTarget, 0.09);
 
   // Look at a point centred on the focus row, tracking the alien's X.
-  _lookTarget.set(chicken.position.x, 0, camFocusZ);
+  _lookTarget.set(camTrackX, 0, camFocusZ);
   camLookAt.lerp(_lookTarget, 0.09);
   camera.lookAt(camLookAt);
 
+  // The projection matrix must be current before the off-screen test.
+  camera.updateMatrixWorld();
+
+  // Caught? Only once the alien has fully cleared the bottom of the screen.
+  if (!dead && alienFullyOffBottom()) {
+    triggerDeath('abduct');
+  }
+
   // Keep the starfield centred on the view so it never runs out
-  if (window.__stars) window.__stars.position.set(chicken.position.x, 0, camFocusZ);
+  if (window.__stars) window.__stars.position.set(camTrackX, 0, camFocusZ);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1124,8 +1427,10 @@ function animate(now) {
 
   shimmerT += dt * 0.001;
 
-  if (!dead) {
-    // ── Move cars & logs ─────────────────────
+  // ── Move cars & logs & lasers ──────────────
+  // Runs even while dead so the world stays alive behind the
+  // death animation instead of freeze-framing.
+  {
     const bound = TILE * GRID_W / 2 + 3.5;
     for (const key of Object.keys(rowData)) {
       const rd = rowData[key];
@@ -1156,7 +1461,9 @@ function animate(now) {
         updateRail(rd, dt / 1000);
       }
     }
+  }
 
+  if (!dead) {
     // ── Ride log ─────────────────────────────
     if (!jumping && ridingLog) {
       const rd = rowData[playerRow];
@@ -1164,8 +1471,8 @@ function animate(now) {
         const spd = ridingLog.userData.speed || rd.speed;
         chicken.position.x += spd * rd.dir;
         playerCol = Math.round(chicken.position.x / TILE);
-        if (chicken.position.x > HALF_W * TILE + 0.6) triggerDeath();
-        if (chicken.position.x < -HALF_W * TILE - 0.6) triggerDeath();
+        if (chicken.position.x >  HALF_W * TILE + 0.6) triggerDeath('drown');
+        if (chicken.position.x < -HALF_W * TILE - 0.6) triggerDeath('drown');
       }
     }
 
@@ -1221,6 +1528,9 @@ function animate(now) {
     const s = Math.max(0.3, 1 - h * 0.28);
     shadowBlob.scale.set(s, s, s);
     shadowBlob.material.opacity = 0.22 * s;
+  } else {
+    // Play whichever death animation is active
+    updateDeathAnim(Math.min(dt / 1000, 0.05));
   }
 
   updateFence();
