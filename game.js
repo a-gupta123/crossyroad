@@ -948,6 +948,7 @@ function restartGame() {
   for (let r = -LOOK_BEHIND; r <= LOOK_AHEAD; r++) { buildRow(r); if (r > maxBuiltRow) maxBuiltRow = r; }
   placeChickenAt(0, 0);
 
+  resetCameraCreep();
   camera.position.copy(CAM_OFFSET);
   camLookAt.set(0, 0, 0);
   camera.lookAt(camLookAt);
@@ -957,22 +958,64 @@ function restartGame() {
 document.getElementById('restart-btn').addEventListener('click', restartGame);
 
 // ─────────────────────────────────────────────────────────────────
-//  CAMERA
+//  CAMERA  (with Crossy-Road-style forward creep / "timer")
 // ─────────────────────────────────────────────────────────────────
-const camLookAt = new THREE.Vector3();
-const _camTarget = new THREE.Vector3();
+// Like the original game, the view slowly scrolls forward on its own.
+// If you dawdle, the bottom edge catches up to you — fall behind it and
+// you're caught (game over). The camera focus tracks a Z value that:
+//   • follows the alien when it moves ahead (view chases the player), and
+//   • always creeps forward a little each frame (never retreats),
+// so standing still eventually pushes the alien off the bottom of screen.
+
+const camLookAt   = new THREE.Vector3();
+const _camTarget  = new THREE.Vector3();
+const _lookTarget = new THREE.Vector3();
+
+// Forward is -Z. camFocusZ is the Z the camera is centred on.
+let camFocusZ = 0;
+// How fast the view creeps forward (world units per frame at 60fps).
+// Ramps up slightly with score so it gets tenser the further you go.
+const CREEP_BASE = 0.006 * TILE;
+// How far behind the focus the alien may fall before being caught.
+// This is tuned to roughly the bottom edge of the visible play area.
+const KILL_MARGIN = TILE * 4.5;
+
+function resetCameraCreep() {
+  camFocusZ = 0;
+}
 
 function updateCamera() {
+  if (!dead) {
+    // Creep forward over time (Z decreases). Speeds up mildly with score.
+    const creep = CREEP_BASE * (1 + Math.min(score, 120) * 0.012);
+    camFocusZ -= creep;
+    // If the alien is further ahead than the focus, snap the focus up to
+    // follow — the player can always outrun the creep by moving forward.
+    if (chicken.position.z < camFocusZ) {
+      camFocusZ = chicken.position.z;
+    }
+
+    // Caught? Alien has fallen behind the bottom edge of the view.
+    if (chicken.position.z > camFocusZ + KILL_MARGIN) {
+      triggerDeath();
+    }
+  }
+
+  // Camera position follows focus in Z, alien in X.
   _camTarget.set(
     chicken.position.x + CAM_OFFSET.x,
     CAM_OFFSET.y,
-    chicken.position.z + CAM_OFFSET.z
+    camFocusZ + CAM_OFFSET.z
   );
   camera.position.lerp(_camTarget, 0.09);
-  camLookAt.lerp(chicken.position, 0.09);
+
+  // Look at a point centred on the focus row, tracking the alien's X.
+  _lookTarget.set(chicken.position.x, 0, camFocusZ);
+  camLookAt.lerp(_lookTarget, 0.09);
   camera.lookAt(camLookAt);
-  // Keep the starfield centred on the player so it never runs out
-  if (window.__stars) window.__stars.position.set(chicken.position.x, 0, chicken.position.z);
+
+  // Keep the starfield centred on the view so it never runs out
+  if (window.__stars) window.__stars.position.set(chicken.position.x, 0, camFocusZ);
 }
 
 // ─────────────────────────────────────────────────────────────────
